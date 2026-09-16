@@ -117,10 +117,12 @@ proc getAndValidateSession*(req: ApiReq): Future[Session] {.async.} =
   of SessionKind.oauth:
     if result.oauthToken.len == 0:
       echo "[sessions] Empty oauth token, session: ", result.pretty
+      release(result)
       raise rateLimitError()
   of SessionKind.cookie:
     if result.authToken.len == 0 or result.ct0.len == 0:
       echo "[sessions] Empty cookie credentials, session: ", result.pretty
+      release(result)
       raise rateLimitError()
 
 template fetchImpl(result, fetchBody) {.dirty.} =

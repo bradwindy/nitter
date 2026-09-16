@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        nim: ["2.0.x", "2.2.x", "devel"]
+        nim: ["2.0.x", "2.2.6", "2.2.x", "devel"]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -49,17 +49,56 @@ jobs:
       - name: Build Project
         run: nimble build -Y
 
-      - name: Upload 2.2.x build artifact
-        if: matrix.nim == '2.2.x'
+      - name: Run offline unit tests
+        run: nimble testUnit -Y
+
+      - name: Upload build artifact
+        if: matrix.nim == '2.2.x' || matrix.nim == '2.2.6'
         uses: actions/upload-artifact@v6
         with:
-          name: nitter-linux-nim-2.2.x-${{ github.sha }}
+          name: nitter-linux-nim-${{ matrix.nim }}-${{ github.sha }}
           path: |
             ./nitter
           if-no-files-found: error
 
-  integration-test:
+  rss-burst-test:
+    name: RSS burst integration tests
     needs: [build-test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcre3 redis-server
+      - uses: actions/download-artifact@v4
+        with:
+          name: nitter-linux-nim-2.2.6-${{ github.sha }}
+          path: .
+      - name: Test RSS routes with local fixtures
+        run: |
+          chmod +x ./nitter
+          python3 tests/rss_burst_integration.py
+
+  integration-config:
+    name: Check integration credentials
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.credentials.outputs.enabled }}
+    steps:
+      - name: Check for X sessions
+        id: credentials
+        env:
+          SESSIONS: ${{ secrets.SESSIONS }}
+        run: |
+          if [[ -n "$SESSIONS" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Live X integration tests require the SESSIONS secret."
+          fi
+
+  integration-test:
+    needs: [build-test, integration-config]
+    if: needs.integration-config.outputs.enabled == 'true'
     name: Integration test
     runs-on: ubuntu-24.04
     timeout-minutes: 30

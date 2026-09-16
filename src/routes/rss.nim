@@ -75,15 +75,11 @@ proc createRssRouter*(cfg: Config) =
         cursor = getCursor()
         key = redisKey("search", $hash(genQueryUrl(query)), cursor)
 
-      var rss = await getCachedRss(key)
-      if rss.cursor.len > 0:
-        respRss(rss, "Search")
-
-      let tweets = await getGraphTweetSearch(query, cursor)
-      rss.cursor = tweets.bottom
-      rss.feed = renderSearchRss(tweets.content, query.text, genQueryUrl(query), cfg, prefs)
-
-      await cacheRss(key, rss)
+      let rss = await getOrFetchRss(key, proc(): Future[Rss] {.async.} =
+        let tweets = await getGraphTweetSearch(query, cursor)
+        return Rss(cursor: tweets.bottom,
+          feed: renderSearchRss(tweets.content, query.text, genQueryUrl(query), cfg, prefs))
+      )
       respRss(rss, "Search")
 
     get "/@name/rss":
@@ -95,13 +91,10 @@ proc createRssRouter*(cfg: Config) =
         name = @"name"
         key = redisKey("twitter", name, getCursor())
 
-      var rss = await getCachedRss(key)
-      if rss.cursor.len > 0:
-        respRss(rss, "User")
-
-      rss = await timelineRss(request, cfg, Query(fromUser: @[name]), prefs)
-
-      await cacheRss(key, rss)
+      let req = request
+      let rss = await getOrFetchRss(key, proc(): Future[Rss] =
+        timelineRss(req, cfg, Query(fromUser: @[name]), prefs)
+      )
       respRss(rss, "User")
 
     get "/@name/@tab/rss":
@@ -122,13 +115,10 @@ proc createRssRouter*(cfg: Config) =
 
       let key = redisKey(tab, name & searchKey, getCursor())
 
-      var rss = await getCachedRss(key)
-      if rss.cursor.len > 0:
-        respRss(rss, "User")
-
-      rss = await timelineRss(request, cfg, query, prefs)
-
-      await cacheRss(key, rss)
+      let req = request
+      let rss = await getOrFetchRss(key, proc(): Future[Rss] =
+        timelineRss(req, cfg, query, prefs)
+      )
       respRss(rss, "User")
 
     get "/@name/lists/@slug/rss":
@@ -158,15 +148,11 @@ proc createRssRouter*(cfg: Config) =
         cursor = getCursor()
         key = redisKey("lists", id, cursor)
 
-      var rss = await getCachedRss(key)
-      if rss.cursor.len > 0:
-        respRss(rss, "List")
-
-      let
-        list = await getCachedList(id=id)
-        timeline = await getGraphListTweets(list.id, cursor)
-      rss.cursor = timeline.bottom
-      rss.feed = renderListRss(timeline.content, list, cfg, prefs)
-
-      await cacheRss(key, rss)
+      let rss = await getOrFetchRss(key, proc(): Future[Rss] {.async.} =
+        let
+          list = await getCachedList(id=id)
+          timeline = await getGraphListTweets(list.id, cursor)
+        return Rss(cursor: timeline.bottom,
+          feed: renderListRss(timeline.content, list, cfg, prefs))
+      )
       respRss(rss, "List")

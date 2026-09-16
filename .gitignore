@@ -18,3 +18,5 @@ dump.rdb
 nimbledeps/
 nimble.paths
 nimble.develop
+
+/build/
