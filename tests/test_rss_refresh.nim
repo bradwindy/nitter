@@ -2,6 +2,8 @@
 import std/[asyncdispatch, unittest]
 import ../src/[rss_refresh, types]
 
+discard getGlobalDispatcher()
+
 suite "shared RSS refreshes":
   test "simultaneous readers share one refresh and receive identical content":
     let gate = newFuture[void]("refresh gate")
