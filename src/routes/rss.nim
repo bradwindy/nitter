@@ -42,6 +42,12 @@ proc timelineRss*(req: Request; cfg: Config; query: Query; prefs: Prefs): Future
     let rss = renderTimelineRss(profile, cfg, prefs, multi=(names.len > 1))
     return Rss(feed: rss, cursor: profile.tweets.bottom)
 
+template respTimelineRss*(key: string; query: Query) =
+  let rss = await getOrFetchRss(key, proc(): Future[Rss] =
+    timelineRss(request, cfg, query, prefs)
+  )
+  respRss(rss, "User")
+
 template respRss*(rss, page) =
   if rss.cursor.len == 0:
     let info = case page
@@ -91,11 +97,7 @@ proc createRssRouter*(cfg: Config) =
         name = @"name"
         key = redisKey("twitter", name, getCursor())
 
-      let req = request
-      let rss = await getOrFetchRss(key, proc(): Future[Rss] =
-        timelineRss(req, cfg, Query(fromUser: @[name]), prefs)
-      )
-      respRss(rss, "User")
+      respTimelineRss(key, Query(fromUser: @[name]))
 
     get "/@name/@tab/rss":
       cond '.' notin @"name"
@@ -113,13 +115,7 @@ proc createRssRouter*(cfg: Config) =
       let searchKey = if tab != "search": ""
                       else: ":" & $hash(genQueryUrl(query))
 
-      let key = redisKey(tab, name & searchKey, getCursor())
-
-      let req = request
-      let rss = await getOrFetchRss(key, proc(): Future[Rss] =
-        timelineRss(req, cfg, query, prefs)
-      )
-      respRss(rss, "User")
+      respTimelineRss(redisKey(tab, name & searchKey, getCursor()), query)
 
     get "/@name/lists/@slug/rss":
       cond @"name" != "i"

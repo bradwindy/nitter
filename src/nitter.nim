@@ -117,8 +117,8 @@ routes:
     resp Http500, showError("Network error occurred, please try again.", cfg)
 
   error SessionBusyError:
-    resp Http503, {"Retry-After": "1"}, showError(
-      "Instance is busy. Please try again shortly.", cfg)
+    const headers = {"Content-Type": "text/html;charset=utf-8", "Retry-After": "1"}
+    resp Http503, headers, showError("Instance is busy. Please try again shortly.", cfg)
 
   error RateLimitError:
     const link = a("another instance", href = instancesUrl)

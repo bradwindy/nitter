@@ -32,6 +32,6 @@ task scss, "Generate css":
 task md, "Render md":
   exec "nim r --hint[Processing]:off tools/rendermd"
 
-task testUnit, "Run offline request queue and RSS refresh tests":
+task test, "Run unit tests":
   for test in ["test_session_queue", "test_rss_refresh"]:
-    exec "nim c -r --assertions:on --path:src --out:build/" & test & " tests/" & test & ".nim"
+    exec "nim r --hint[Processing]:off --path:src tests/" & test

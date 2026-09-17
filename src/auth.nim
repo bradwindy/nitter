@@ -12,12 +12,13 @@ const hourInSeconds = 60 * 60
 
 var
   sessionPool: seq[Session]
+  sessionWaiters: seq[SessionWaiter]
   enableLogging = false
   # max requests at a time per session to avoid race conditions
   maxConcurrentReqs = 2
+  # max requests waiting for a busy session, and how long each may wait
   maxPendingReqs = 100
   sessionWaitMs = 10000
-  sessionWaiters: seq[SessionWaiter]
 
 proc setMaxConcurrentReqs*(reqs: int) =
   if reqs > 0:
@@ -174,40 +175,45 @@ proc isLimited(session: Session; req: ApiReq): bool =
     return false
 
 proc availableSession(req: ApiReq): tuple[session: Session, busy: bool] =
-  if sessionPool.len == 0: return
-  let start = rand(sessionPool.high)
-  for offset in 0 ..< sessionPool.len:
-    let session = sessionPool[(start + offset) mod sessionPool.len]
+  # uniform choice among sessions with a free slot
+  var candidates = 0
+  for session in sessionPool:
     if session.isLimited(req): continue
-    if session.pending < maxConcurrentReqs:
-      return (session, false)
-    result.busy = true
+    if session.pending >= maxConcurrentReqs:
+      result.busy = true
+      continue
+    inc candidates
+    if rand(candidates - 1) == 0:
+      result.session = session
 
 proc busyError(): ref SessionBusyError =
   newException(SessionBusyError, "session queue is full or timed out")
 
 proc processSessionWaiters() =
+  let now = getMonoTime()
   var i = 0
   while i < sessionWaiters.len:
-    let waiter = sessionWaiters[i]
-    let available = availableSession(waiter.req)
-    if getMonoTime() >= waiter.deadline:
-      sessionWaiters.delete(i)
-      waiter.future.fail(busyError())
-    elif not available.session.isNil:
-      sessionWaiters.delete(i)
+    let
+      waiter = sessionWaiters[i]
+      available = availableSession(waiter.req)
+    if available.session.isNil and available.busy and now < waiter.deadline:
+      inc i
+      continue
+    sessionWaiters.delete(i)
+    if not available.session.isNil:
       inc available.session.pending
       waiter.future.complete(available.session)
-    elif not available.busy:
-      sessionWaiters.delete(i)
-      waiter.future.fail(noSessionsError())
+    elif available.busy:
+      log "session wait timed out for API: ", waiter.req.cookie.endpoint
+      waiter.future.fail(busyError())
     else:
-      inc i
+      waiter.future.fail(noSessionsError())
 
 proc invalidate*(session: var Session) =
   if session.isNil: return
   log "invalidating: ", session.pretty
 
+  # TODO: This isn't sufficient, but it works for now
   let idx = sessionPool.find(session)
   if idx > -1: sessionPool.delete(idx)
   session = nil
@@ -219,6 +225,10 @@ proc release*(session: Session) =
   processSessionWaiters()
 
 proc getSession*(req: ApiReq): Future[Session] {.async.} =
+  # queued requests get first pick of capacity freed by a rate limit reset
+  if sessionWaiters.len > 0:
+    processSessionWaiters()
+
   let available = availableSession(req)
   if not available.session.isNil:
     inc available.session.pending
@@ -226,21 +236,17 @@ proc getSession*(req: ApiReq): Future[Session] {.async.} =
   if not available.busy:
     log "no sessions available for API: ", req.cookie.endpoint
     raise noSessionsError()
-  if sessionWaiters.len >= maxPendingReqs or sessionWaitMs == 0:
+  if sessionWaitMs == 0 or sessionWaiters.len >= maxPendingReqs:
+    log "session queue full for API: ", req.cookie.endpoint
     raise busyError()
 
-  let future = newFuture[Session]("getSession.wait")
-  sessionWaiters.add SessionWaiter(req: req, future: future,
-    deadline: getMonoTime() + initDuration(milliseconds=sessionWaitMs))
-  try:
-    if not await withTimeout(future, sessionWaitMs):
-      raise busyError()
-    return await future
-  finally:
-    for i in 0 ..< sessionWaiters.len:
-      if sessionWaiters[i].future == future:
-        sessionWaiters.delete(i)
-        break
+  let waiter = SessionWaiter(req: req, future: newFuture[Session]("getSession"),
+    deadline: getMonoTime() + initDuration(milliseconds = sessionWaitMs))
+  sessionWaiters.add waiter
+  await waiter.future or sleepAsync(sessionWaitMs)
+  if not waiter.future.finished:
+    processSessionWaiters()
+  return await waiter.future
 
 proc setLimited*(session: Session; req: ApiReq) =
   let api = req.endpoint(session)

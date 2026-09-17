@@ -73,44 +73,6 @@ In the future a simple account system will be added that lets you follow Twitter
 users, allowing you to have a clean chronological timeline without needing a
 Twitter account.
 
-## Handling RSS refresh bursts
-
-Feed readers often refresh all subscriptions at once. Nitter waits for a session
-slot when valid sessions are busy, without increasing requests to X beyond
-`maxConcurrentReqs` per session. Concurrent refreshes of the same RSS cache key
-share one cache lookup and fetch, including requests from different readers.
-This applies to profile, replies, media, articles, search and list feeds.
-
-The `[Config]` section has two queue settings:
-
-- `maxPendingReqs = 100`: maximum requests waiting for a session in each Nitter
-  process. This is separate from active requests and the RSS cache.
-- `sessionWaitMs = 10000`: maximum time in milliseconds to wait for each session
-  acquisition. This is not an overall HTTP request or X response timeout.
-
-Setting either value to zero disables waiting. Negative values are treated as
-zero. A full queue or expired wait returns HTTP 503 with `Retry-After: 1`, so a
-brief local capacity shortage does not trigger feed readers' host-wide 429
-backoff. Missing sessions and X rate limits still return HTTP 429. The queue does
-not bypass X limits, renew credentials, or serve expired RSS cache entries.
-
-The queue and shared refreshes are local to each process. A disconnected reader's
-already-started fetch may finish and populate the cache for other readers.
-
-### Testing request scheduling
-
-After installing the Nim dependencies, run `nimble testUnit`. These tests need
-neither Redis nor X credentials. They cover simultaneous requests, session
-selection, queue limits, timeouts, errors and duplicate RSS refreshes. CI runs
-them across its supported Nim versions. The existing live integration tests
-run only when the repository has a `SESSIONS` secret.
-
-For end-to-end RSS tests, build Nitter with Nim 2.2.6 (the Dockerfile version),
-install `redis-server` and run `python3 tests/rss_burst_integration.py`. This starts
-only disposable local services and uses fake X credentials. It checks the real
-RSS routes for burst handling, shared refreshes, cache hits, HTTP 503 responses,
-recovery and genuine HTTP 429 errors. It does not contact X.
-
 ## Screenshot
 
 ![nitter](/screenshot.png)

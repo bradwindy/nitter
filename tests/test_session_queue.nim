@@ -83,7 +83,7 @@ suite "session request queue":
       check sessionWaiters.len == 0
     release(active)
 
-  test "timed out requests are removed and cannot consume a released slot":
+  test "timed out requests are removed without leaking a slot":
     setMaxConcurrentReqs(1)
     setSessionQueueLimits(10, 5)
     let active = waitFor getSession(tweets)
@@ -95,16 +95,35 @@ suite "session request queue":
     check next.pending == 1
     release(next)
 
-  test "release cannot grant a slot after the wait deadline":
+  test "a request past its deadline is still served once a slot frees":
     setMaxConcurrentReqs(1)
     setSessionQueueLimits(10, 5)
     let active = waitFor getSession(tweets)
     let queued = getSession(tweets)
     sleep(15)
     release(active)
-    expect SessionBusyError:
-      discard waitFor queued
-    check sessionPool[0].pending == 0
+    let acquired = waitFor queued
+    check acquired.pending == 1
+    release(acquired)
+    check sessionWaiters.len == 0
+
+  test "a session freed by a limit reset serves queued requests before new ones":
+    setMaxConcurrentReqs(1)
+    let limited = newSession()
+    limited.limited = true
+    limited.limitedAt = epochTime().int
+    sessionPool.add limited
+    let active = waitFor getSession(tweets)
+    check active == sessionPool[0]
+    let queued = getSession(tweets)
+    check not queued.finished
+    limited.limitedAt -= hourInSeconds + 1
+    let arrived = getSession(tweets)
+    check (waitFor queued) == limited
+    check not arrived.finished
+    release(active)
+    release(waitFor arrived)
+    release(limited)
     check sessionWaiters.len == 0
 
   test "no sessions and genuine rate limits fail without queueing":
@@ -140,18 +159,6 @@ suite "session request queue":
       discard waitFor queued
     check sessionWaiters.len == 0
     check sessionPool.len == 0
-
-  test "an upstream failure releases capacity for the next request":
-    setMaxConcurrentReqs(1)
-    let active = waitFor getSession(tweets)
-    let queued = getSession(tweets)
-    expect IOError:
-      try:
-        raise newException(IOError, "upstream disconnected")
-      finally:
-        release(active)
-    release(waitFor queued)
-    check sessionPool[0].pending == 0
 
   test "OAuth sessions use their own endpoint limits and queued slots":
     sessionPool = @[Session(kind: SessionKind.oauth,

@@ -5,15 +5,12 @@ import types
 var rssRefreshes: Table[string, Future[Rss]]
 
 proc shareRssRefresh*(key: string; fetch: proc(): Future[Rss] {.closure.}): Future[Rss] {.async.} =
-  if key in rssRefreshes:
-    return await rssRefreshes[key]
-
-  let future = newFuture[Rss]("shareRssRefresh")
-  rssRefreshes[key] = future
+  # concurrent callers for the same key share one in-flight fetch
+  if key notin rssRefreshes:
+    rssRefreshes[key] = fetch()
+  let future = rssRefreshes[key]
   try:
-    future.complete(await fetch())
-  except CatchableError as e:
-    future.fail(e)
+    return await future
   finally:
-    rssRefreshes.del(key)
-  return await future
+    if rssRefreshes.getOrDefault(key) == future:
+      rssRefreshes.del(key)

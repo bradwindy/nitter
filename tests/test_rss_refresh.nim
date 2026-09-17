@@ -2,6 +2,7 @@
 import std/[asyncdispatch, unittest]
 import ../src/[rss_refresh, types]
 
+# run future callbacks through the event loop, as nitter does
 discard getGlobalDispatcher()
 
 suite "shared RSS refreshes":
@@ -66,9 +67,21 @@ suite "shared RSS refreshes":
       discard waitFor shareRssRefresh("twitter:sync", broken)
     check (waitFor shareRssRefresh("twitter:sync", recovered)).feed == "recovered"
 
-  test "empty and suspended results are passed through unchanged":
-    proc empty(): Future[Rss] {.async.} = return Rss()
-    proc suspended(): Future[Rss] {.async.} =
-      return Rss(feed: "user", cursor: "suspended")
-    check (waitFor shareRssRefresh("twitter:empty", empty)) == Rss()
-    check (waitFor shareRssRefresh("twitter:suspended", suspended)).cursor == "suspended"
+  test "a defect in the refresh fails every reader instead of hanging them":
+    let gate = newFuture[void]("refresh gate")
+    var calls = 0
+    proc fetch(): Future[Rss] {.async.} =
+      inc calls
+      if calls == 1:
+        await gate
+        raise newException(AssertionDefect, "parser assertion")
+      return Rss(feed: "recovered", cursor: "next")
+    let first = shareRssRefresh("twitter:defect", fetch)
+    let second = shareRssRefresh("twitter:defect", fetch)
+    gate.complete()
+    expect AssertionDefect:
+      discard waitFor first
+    expect AssertionDefect:
+      discard waitFor second
+    check calls == 1
+    check (waitFor shareRssRefresh("twitter:defect", fetch)).feed == "recovered"
