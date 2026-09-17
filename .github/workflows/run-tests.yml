@@ -49,6 +49,9 @@ jobs:
       - name: Build Project
         run: nimble build -Y
 
+      - name: Run unit tests
+        run: nimble test -Y
+
       - name: Upload 2.2.x build artifact
         if: matrix.nim == '2.2.x'
         uses: actions/upload-artifact@v6

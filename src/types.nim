@@ -6,6 +6,7 @@ genPrefsType()
 
 type
   RateLimitError* = object of CatchableError
+  SessionBusyError* = object of CatchableError
   NoSessionsError* = object of CatchableError
   InternalError* = object of CatchableError
   BadClientError* = object of CatchableError
@@ -441,6 +442,8 @@ type
     apiProxy*: string
     disableTid*: bool
     maxConcurrentReqs*: int
+    maxPendingReqs*: int
+    sessionWaitMs*: int
     maxRetries*: int
     retryDelayMs*: int
 

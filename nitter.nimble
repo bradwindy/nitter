@@ -31,3 +31,7 @@ task scss, "Generate css":
 
 task md, "Render md":
   exec "nim r --hint[Processing]:off tools/rendermd"
+
+task test, "Run unit tests":
+  for test in ["test_session_queue", "test_rss_refresh"]:
+    exec "nim r --hint[Processing]:off --path:src tests/" & test

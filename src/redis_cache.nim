@@ -2,7 +2,7 @@
 import asyncdispatch, times, strformat, strutils, tables, hashes
 import redis, redpool, flatty, supersnappy
 
-import types, api
+import types, api, rss_refresh
 
 const
   redisNil = "\0\0"
@@ -258,3 +258,11 @@ proc getCachedRss*(key: string): Future[Rss] {.async.} =
           except: echo "Decompressing RSS failed: ", feed
     else:
       result.cursor.setLen 0
+
+proc getOrFetchRss*(key: string; fetch: proc(): Future[Rss] {.closure.}): Future[Rss] =
+  shareRssRefresh(key, proc(): Future[Rss] {.async.} =
+    result = await getCachedRss(key)
+    if result.cursor.len > 0: return
+    result = await fetch()
+    await cacheRss(key, result)
+  )

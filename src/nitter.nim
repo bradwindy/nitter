@@ -44,6 +44,7 @@ setHttpProxy(cfg.proxy, cfg.proxyAuth)
 setApiProxy(cfg.apiProxy)
 setDisableTid(cfg.disableTid)
 setMaxConcurrentReqs(cfg.maxConcurrentReqs)
+setSessionQueueLimits(cfg.maxPendingReqs, cfg.sessionWaitMs)
 setMaxRetries(cfg.maxRetries)
 setRetryDelayMs(cfg.retryDelayMs)
 initAboutPage(cfg.staticDir)
@@ -114,6 +115,10 @@ routes:
   error BadClientError:
     echo error.exc.name, ": ", error.exc.msg
     resp Http500, showError("Network error occurred, please try again.", cfg)
+
+  error SessionBusyError:
+    const headers = {"Content-Type": "text/html;charset=utf-8", "Retry-After": "1"}
+    resp Http503, headers, showError("Instance is busy. Please try again shortly.", cfg)
 
   error RateLimitError:
     const link = a("another instance", href = instancesUrl)
